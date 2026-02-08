@@ -1,5 +1,51 @@
 const db = require('../config/db');
 
+function toPublicAssetUrl(value) {
+  if (!value) return '';
+  const raw = String(value).trim().replace(/\?+$/, '');
+  if (!raw) return '';
+  if (raw.startsWith('http://') || raw.startsWith('https://')) return encodeURI(raw);
+
+  const normalizedPath = raw.replace(/^\/+/, '');
+  const explicitBase = (process.env.STORAGE_PUBLIC_BASE_URL || '').trim();
+  if (explicitBase) {
+    return encodeURI(`${explicitBase.replace(/\/+$/, '')}/${normalizedPath}`);
+  }
+
+  const projectUrl = (process.env.SUPABASE_PROJECT_URL || '').trim();
+  const bucket = (process.env.STORAGE_BUCKET || 'logicbox-jr-app-assets').trim();
+  if (projectUrl && normalizedPath.startsWith('storage/v1/object/public/')) {
+    return encodeURI(`${projectUrl.replace(/\/+$/, '')}/${normalizedPath}`);
+  }
+  if (projectUrl) {
+    const pathWithoutBucket = normalizedPath.startsWith(`${bucket}/`)
+      ? normalizedPath.slice(bucket.length + 1)
+      : normalizedPath;
+    return encodeURI(`${projectUrl.replace(/\/+$/, '')}/storage/v1/object/public/${bucket}/${pathWithoutBucket}`);
+  }
+
+  return encodeURI(raw);
+}
+
+function normalizeGameRow(row) {
+  const title = row.title || row.name || row.file_name || 'Untitled';
+  const gameUrl = toPublicAssetUrl(row.game_url || row.file_url || '');
+  const thumbnailUrl = toPublicAssetUrl(row.thumbnail_url || row.image_url || '');
+  const gradeLevel = row.grade_level || row.grade || '';
+  const category = row.subject || row.category || 'General';
+
+  return {
+    id: row.id,
+    title,
+    description: row.description || '',
+    grade_level: String(gradeLevel),
+    game_url: gameUrl,
+    thumbnail_url: thumbnailUrl,
+    category,
+    created_at: row.created_at || null,
+  };
+}
+
 exports.getGamesByGrade = async (req, res) => {
   const { grade } = req.query;
 
@@ -8,8 +54,25 @@ exports.getGamesByGrade = async (req, res) => {
   }
 
   try {
-    const { rows } = await db.query('SELECT * FROM games WHERE grade_level = $1', [grade]);
-    res.status(200).json({ games: rows });
+    const { rows } = await db.query('SELECT * FROM games ORDER BY created_at ASC NULLS LAST');
+    const gradeValue = String(grade);
+    const filteredRows = rows.filter((row) => {
+      const rowGrade = String(row.grade_level ?? row.grade ?? '');
+      return rowGrade === gradeValue;
+    });
+
+    const isAuthed = Boolean(req.user);
+    const games = filteredRows.map((row, idx) => {
+      const game = normalizeGameRow(row);
+      const locked = !isAuthed && idx >= 2;
+      return {
+        ...game,
+        locked,
+        game_url: locked ? null : game.game_url,
+      };
+    });
+
+    res.status(200).json({ games });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -17,8 +80,8 @@ exports.getGamesByGrade = async (req, res) => {
 
 exports.getAllGames = async (req, res) => {
     try {
-        const { rows } = await db.query('SELECT * FROM games');
-        res.status(200).json({ games: rows });
+        const { rows } = await db.query('SELECT * FROM games ORDER BY created_at ASC NULLS LAST');
+        res.status(200).json({ games: rows.map(normalizeGameRow) });
       } catch (error) {
         res.status(500).json({ error: error.message });
       }

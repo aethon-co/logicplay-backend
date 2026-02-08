@@ -2,10 +2,10 @@ const path = require('path');
 require('dotenv').config({ path: path.resolve(__dirname, '../../.env') });
 const { Pool } = require('pg');
 
-const connectionString = process.env.SUPABASE_URL;
+const connectionString = process.env.DATABASE_URL || process.env.SUPABASE_URL;
 
 if (!connectionString) {
-  console.error('Missing SUPABASE_URL file');
+  console.error('Missing DATABASE_URL/SUPABASE_URL in .env');
 }
 
 const pool = new Pool({
