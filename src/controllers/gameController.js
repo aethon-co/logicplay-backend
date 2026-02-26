@@ -86,3 +86,30 @@ exports.getAllGames = async (req, res) => {
         res.status(500).json({ error: error.message });
       }
 };
+
+exports.getMultiplayerLeaderboard = async (req, res) => {
+  const { grade } = req.query;
+  try {
+    let result;
+    if (grade) {
+      result = await db.query(
+        `SELECT id, full_name, grade, school_name, COALESCE(multiplayer_score, 0) AS multiplayer_score
+         FROM users
+         WHERE grade = $1
+         ORDER BY multiplayer_score DESC
+         LIMIT 50`,
+        [grade]
+      );
+    } else {
+      result = await db.query(
+        `SELECT id, full_name, grade, school_name, COALESCE(multiplayer_score, 0) AS multiplayer_score
+         FROM users
+         ORDER BY multiplayer_score DESC
+         LIMIT 50`
+      );
+    }
+    res.status(200).json({ leaderboard: result.rows });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};

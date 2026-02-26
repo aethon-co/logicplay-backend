@@ -45,6 +45,26 @@ async function ensureCoreTables() {
       created_at timestamp with time zone DEFAULT timezone('utc'::text, now()) NOT NULL
     )
   `);
+
+  // Add multiplayer_score column to users (safe to run multiple times)
+  await db.query(`
+    ALTER TABLE public.users ADD COLUMN IF NOT EXISTS multiplayer_score integer DEFAULT 0 NOT NULL
+  `);
+
+  // Multiplayer match history
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS public.multiplayer_history (
+      id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+      player1_id uuid,
+      player1_name text NOT NULL,
+      player2_id uuid,
+      player2_name text NOT NULL,
+      player1_score integer DEFAULT 0,
+      player2_score integer DEFAULT 0,
+      winner_id uuid,
+      played_at timestamp with time zone DEFAULT timezone('utc'::text, now()) NOT NULL
+    )
+  `);
 }
 
 module.exports = { ensureCoreTables };

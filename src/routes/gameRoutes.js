@@ -5,5 +5,6 @@ const { optionalAuth, requireAuth } = require('../middleware/auth');
 
 router.get('/', optionalAuth, gameController.getGamesByGrade);
 router.get('/all', requireAuth, gameController.getAllGames);
+router.get('/multiplayer-leaderboard', optionalAuth, gameController.getMultiplayerLeaderboard);
 
 module.exports = router;

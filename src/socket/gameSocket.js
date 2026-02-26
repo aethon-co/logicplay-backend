@@ -1,7 +1,8 @@
 const { Server } = require('socket.io');
+const db = require('../config/db');
 
-const rooms = new Map(); // roomId -> { players: [{id, score, name}], currentQuestionIndex: 0, questions: [], timer: null }
-const waitingPlayers = []; // [{id, name, socket}]
+const rooms = new Map(); // roomId -> { players: [{id, userId, score, name}], ... }
+const waitingPlayers = []; // [{id, userId, name, socket}]
 
 const QUESTIONS = [
   { question: "What is 2 + 2?", options: ["3", "4", "5", "6"], answer: 1 },
@@ -37,9 +38,10 @@ function initSocket(server) {
 
     socket.on('join_matchmaking', (data) => {
       const playerName = data?.name || 'Player';
-      console.log(`${playerName} joined matchmaking`);
+      const userId = data?.userId || null;
+      console.log(`${playerName} joined matchmaking (userId: ${userId})`);
       
-      waitingPlayers.push({ id: socket.id, name: playerName, socket });
+      waitingPlayers.push({ id: socket.id, userId, name: playerName, socket });
 
       if (waitingPlayers.length >= 2) {
         const player1 = waitingPlayers.shift();
@@ -55,8 +57,8 @@ function initSocket(server) {
         rooms.set(roomId, {
           id: roomId,
           players: [
-            { id: player1.id, name: player1.name, score: 0, answered: false, lastAnswerIndex: -1 },
-            { id: player2.id, name: player2.name, score: 0, answered: false, lastAnswerIndex: -1 }
+            { id: player1.id, userId: player1.userId, name: player1.name, score: 0, answered: false, lastAnswerIndex: -1 },
+            { id: player2.id, userId: player2.userId, name: player2.name, score: 0, answered: false, lastAnswerIndex: -1 }
           ],
           currentQuestionIndex: 0,
           questions: gameQuestions,
@@ -142,7 +144,34 @@ function initSocket(server) {
   });
 }
 
-function sendNextQuestion(io, roomId) {
+async function saveGameResult(players) {
+  if (players.length < 2) return;
+  const [p1, p2] = players;
+  const winner = p1.score > p2.score ? p1 : p2.score > p1.score ? p2 : null;
+  const winnerId = winner?.userId || null;
+
+  try {
+    await db.query(
+      `INSERT INTO multiplayer_history (player1_id, player1_name, player2_id, player2_name, player1_score, player2_score, winner_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      [p1.userId || null, p1.name, p2.userId || null, p2.name, p1.score, p2.score, winnerId]
+    );
+
+    // Add score to winner(+10), loser(+2), tie(+5 each)
+    for (const p of players) {
+      if (!p.userId) continue;
+      const bonus = winner === null ? 5 : p === winner ? 10 : 2;
+      await db.query(
+        `UPDATE users SET multiplayer_score = COALESCE(multiplayer_score, 0) + $1 WHERE id = $2`,
+        [bonus, p.userId]
+      );
+    }
+  } catch (err) {
+    console.error('Failed to save multiplayer result:', err);
+  }
+}
+
+async function sendNextQuestion(io, roomId) {
   const room = rooms.get(roomId);
   if (!room) return;
 
@@ -151,6 +180,8 @@ function sendNextQuestion(io, roomId) {
     io.to(roomId).emit('game_over', {
       players: room.players.map(p => ({ id: p.id, name: p.name, score: p.score }))
     });
+    // Persist result and update scores
+    await saveGameResult(room.players);
     rooms.delete(roomId);
     return;
   }
@@ -175,7 +206,7 @@ function sendNextQuestion(io, roomId) {
   }, 10000);
 }
 
-function endQuestion(io, roomId) {
+async function endQuestion(io, roomId) {
   const room = rooms.get(roomId);
   if (!room) return;
 
