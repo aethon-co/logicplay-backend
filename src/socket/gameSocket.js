@@ -66,8 +66,18 @@ function initSocket(server) {
           questionStartTime: 0
         });
 
-        io.to(roomId).emit('match_found', {
+        // Emit individually so each player knows their own socket id (myId)
+        player1.socket.emit('match_found', {
           roomId,
+          myId: player1.id,
+          players: [
+            { id: player1.id, name: player1.name },
+            { id: player2.id, name: player2.name }
+          ]
+        });
+        player2.socket.emit('match_found', {
+          roomId,
+          myId: player2.id,
           players: [
             { id: player1.id, name: player1.name },
             { id: player2.id, name: player2.name }
@@ -157,13 +167,14 @@ async function saveGameResult(players) {
       [p1.userId || null, p1.name, p2.userId || null, p2.name, p1.score, p2.score, winnerId]
     );
 
-    // Add score to winner(+10), loser(+2), tie(+5 each)
+    // Add actual game score + bonus to leaderboard score
     for (const p of players) {
       if (!p.userId) continue;
       const bonus = winner === null ? 5 : p === winner ? 10 : 2;
+      const totalAdd = p.score + bonus;
       await db.query(
         `UPDATE users SET multiplayer_score = COALESCE(multiplayer_score, 0) + $1 WHERE id = $2`,
-        [bonus, p.userId]
+        [totalAdd, p.userId]
       );
     }
   } catch (err) {
